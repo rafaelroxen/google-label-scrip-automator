@@ -10,9 +10,11 @@ def run(cmd):
 
 def pick_project():
     projs = json.loads(run(["gcloud", "projects", "list", "--format=json"]))
+    projs = [p for p in projs if not p['projectId'].startswith("sys-")]
     for i, p in enumerate(projs, 1):
         print(f"{i}) {p['projectId']} — {p['name']}")
     return projs[int(input("Projeto número: ")) -1]['projectId']
+
 
 def list_resources(cmd, project):
     if cmd[0] == "bq":
