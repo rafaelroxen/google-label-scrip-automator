@@ -1,0 +1,1 @@
+# google-label-scrip-automator
