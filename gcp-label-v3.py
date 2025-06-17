@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import subprocess, json, sys
+import subprocess, json, sys, csv
+
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -8,29 +9,22 @@ def run(cmd):
         sys.exit(1)
     return p.stdout
 
+
 def check_auth():
     try:
         run(["gcloud", "auth", "list"])
     except Exception:
-        print("❌ Você não está autenticado com o gcloud. Execute `gcloud auth login`.")
+        print("\n❌ Você não está autenticado com o gcloud. Execute `gcloud auth login`.\n")
         sys.exit(1)
+
 
 def check_permissions(project):
     try:
         run(["gcloud", "projects", "get-iam-policy", project, "--format=json"])
     except:
-        print(f"❌ Sem permissão para acessar o projeto '{project}'.")
+        print(f"\n❌ Sem permissão para acessar o projeto '{project}'.\n")
         sys.exit(1)
 
-def run_summary(project, resource_key, labels, dry_run):
-    print("\nResumo da operação:")
-    print(f"Projeto: {project}")
-    print(f"Recurso: {resource_key}")
-    print(f"Labels: {labels}")
-    print(f"Modo: {'Dry-run' if dry_run else 'Execução real'}")
-    if input("Deseja continuar? (s/n): ").lower() != "s":
-        print("Operação cancelada.")
-        sys.exit(0)
 
 def pick_project():
     projs = json.loads(run(["gcloud", "projects", "list", "--format=json"]))
@@ -39,10 +33,12 @@ def pick_project():
         print(f"{i}) {p['projectId']} — {p['name']}")
     return projs[int(input("Projeto número: ")) - 1]['projectId']
 
+
 def list_resources(cmd, project):
     if cmd[0] == "bq":
         return json.loads(run(cmd))
     return json.loads(run(cmd + ["--project", project, "--format=json"]))
+
 
 def pick_items(items):
     for i, it in enumerate(items, 1):
@@ -61,8 +57,10 @@ def pick_items(items):
         return items
     return [items[int(x.strip()) - 1] for x in sel.split(",")]
 
+
 def ask_labels():
     return input("Labels (chave=valor separados por vírgula): ").strip()
+
 
 def apply_labels(cfg, item, project, lbls, dry_run=False):
     if cfg["type"] == "cloud-run":
@@ -88,13 +86,11 @@ def apply_labels(cfg, item, project, lbls, dry_run=False):
     else:
         name = item.get("name") or item.get("id") or item.get("metadata", {}).get("name")
         cmd = cfg["apply"] + [name]
-
         if cfg["type"] != "cloudsql":
             if "zone" in item:
                 cmd += ["--zone", item["zone"].split("/")[-1]]
             elif "region" in item:
                 cmd += ["--region", item["region"].split("/")[-1]]
-
         cmd += [cfg["flag"], lbls, "--project", project, "--quiet"]
 
     print("->", " ".join(cmd))
@@ -107,28 +103,23 @@ def apply_labels(cfg, item, project, lbls, dry_run=False):
     else:
         print("🔍 Modo dry-run: comando não executado.\n")
 
+
 def main():
     check_auth()
     project = pick_project()
     check_permissions(project)
 
     types = {
-        "instances":   {"list": ["gcloud", "compute", "instances", "list"], "apply": ["gcloud", "compute", "instances", "update"], "flag": "--update-labels", "type": "compute"},
-        "disks":       {"list": ["gcloud", "compute", "disks", "list"], "apply": ["gcloud", "compute", "disks", "update"], "flag": "--update-labels", "type": "compute"},
-        "snapshots":   {"list": ["gcloud", "compute", "snapshots", "list"], "apply": ["gcloud", "compute", "snapshots", "update"], "flag": "--update-labels", "type": "compute"},
-        "buckets":     {"list": ["gcloud", "storage", "buckets", "list"], "apply": ["gcloud", "storage", "buckets", "update"], "flag": "--update-labels", "type": "buckets"},
-        "forwarding_rules": {"list": ["gcloud", "compute", "forwarding-rules", "list"], "apply": ["gcloud", "compute", "forwarding-rules", "update"], "flag": "--update-labels", "type": "compute"},
-        "addresses":   {"list": ["gcloud", "compute", "addresses", "list"], "apply": ["gcloud", "alpha", "compute", "addresses", "update"], "flag": "--update-labels", "type": "compute"},
+        "disks": {"list": ["gcloud", "compute", "disks", "list"], "apply": ["gcloud", "compute", "disks", "update"], "flag": "--update-labels", "type": "compute"},
+        "snapshots": {"list": ["gcloud", "compute", "snapshots", "list"], "apply": ["gcloud", "compute", "snapshots", "update"], "flag": "--update-labels", "type": "compute"},
+        "buckets": {"list": ["gcloud", "storage", "buckets", "list"], "apply": ["gcloud", "storage", "buckets", "update"], "flag": "--update-labels", "type": "buckets"},
+        "addresses": {"list": ["gcloud", "compute", "addresses", "list"], "apply": ["gcloud", "alpha", "compute", "addresses", "update"], "flag": "--update-labels", "type": "compute"},
         "vpn_tunnels": {"list": ["gcloud", "compute", "vpn-tunnels", "list"], "apply": ["gcloud", "compute", "vpn-tunnels", "update"], "flag": "--update-labels", "type": "compute"},
         "cloud_run_services": {"list": ["gcloud", "run", "services", "list", "--platform=managed"], "apply": ["gcloud", "run", "services", "update", "--platform=managed"], "flag": "--update-labels", "type": "cloud-run"},
-        "cloud_sql":   {"list": ["gcloud", "sql", "instances", "list"], "apply": ["gcloud", "beta", "sql", "instances", "patch"], "flag": "--update-labels", "type": "cloudsql"},
+        "cloud_sql": {"list": ["gcloud", "sql", "instances", "list"], "apply": ["gcloud", "beta", "sql", "instances", "patch"], "flag": "--update-labels", "type": "cloudsql"},
         "spanner_instances": {"list": ["gcloud", "spanner", "instances", "list"], "apply": ["gcloud", "spanner", "instances", "update"], "flag": "--update-labels", "type": "spanner"},
         "bq_datasets": {"list": ["bq", "ls", "--format=json"], "apply": ["bq", "update"], "flag": None, "type": "bq"},
-        "cloud_functions": {"list": ["gcloud", "functions", "list", "--format=json"], "apply": ["gcloud", "functions", "update"], "flag": "--update-labels", "type": "functions"},
-        "secrets": {"list": ["gcloud", "secrets", "list", "--format=json"], "apply": ["gcloud", "secrets", "update"], "flag": "--update-labels", "type": "secrets"},
-        "artifact_repos": {"list": ["gcloud", "artifacts", "repositories", "list", "--location=us-central1", "--format=json"], "apply": ["gcloud", "artifacts", "repositories", "update", "--location=us-central1"], "flag": "--update-labels", "type": "artifact"},
-        "pubsub_topics": {"list": ["gcloud", "pubsub", "topics", "list", "--format=json"], "apply": ["gcloud", "pubsub", "topics", "update"], "flag": "--update-labels", "type": "pubsub"},
-        "pubsub_subs": {"list": ["gcloud", "pubsub", "subscriptions", "list", "--format=json"], "apply": ["gcloud", "pubsub", "subscriptions", "update"], "flag": "--update-labels", "type": "pubsub"}
+        "gke_clusters": {"list": ["gcloud", "container", "clusters", "list"], "apply": ["gcloud", "container", "clusters", "update"], "flag": "--update-labels", "type": "compute"}
     }
 
     print("\nTipos de recurso disponíveis para aplicar labels:")
@@ -146,10 +137,9 @@ def main():
     lbls = ask_labels()
     dry = input("Executar em modo dry-run? (s/n): ").lower().startswith("s")
 
-    run_summary(project, resource_key, lbls, dry)
-
     for it in sel:
         apply_labels(cfg, it, project, lbls, dry_run=dry)
+
 
 if __name__ == "__main__":
     main()
